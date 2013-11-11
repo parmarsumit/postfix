@@ -1,0 +1,404 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+  "Description" : "Postfix CloudFormation template file.",
+  "Parameters" : {
+    "HostedZone" : {
+      "Description" : "The DNS name of an existing Amazon Route 53 hosted zone",
+      "Default" : "miyamoto.classmethod.info",
+      "Type" : "String"
+    },
+    "DomainName" : {
+      "Description" : "The domain name of mail addresses",
+      "Default" : "miyamoto.classmethod.info",
+      "Type" : "String"
+    },
+    "VpcId" : {
+      "Type" : "String",
+      "Default" : "vpc-5524fd3d",
+      "Description" : "VpcId of your existing Virtual Private Cloud (VPC)"
+    },
+    "VpcCidrBlock" : {
+      "Type" : "String",
+      "Default" : "10.0.0.0/16",
+      "Description" : "CIDR block of your Virtual Private Cloud (VPC)"
+    },
+    "PrimarySubnetId" : {
+      "Type" : "String",
+      "Default" : "subnet-5724fd3f",
+      "Description" : "SubnetId in your Virtual Private Cloud (VPC)"
+    },
+    "SecondarySubnetId" : {
+      "Type" : "String",
+      "Default" : "subnet-5624fd3e",
+      "Description" : "SubnetId in your Virtual Private Cloud (VPC)"
+    },
+    "KeyName" : {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instances",
+      "Type" : "String",
+      "MinLength" : "1",
+      "MaxLength" : "64",
+      "AllowedPattern" : "[-_ a-zA-Z0-9]*",
+      "Default" : "miyamoto-kp1",
+      "ConstraintDescription" : "can contain only alphanumeric characters, spaces, dashes and underscores."
+    },
+    "InstanceType": {
+      "Default": "t1.micro",
+      "Description": "EC2 instance type",
+      "Type": "String",
+      "AllowedValues": [
+        "t1.micro", "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge",
+        "m2.4xlarge", "c1.medium", "c1.xlarge", "cc1.4xlarge", "cc2.8xlarge", "cg1.4xlarge"
+      ],
+      "ConstraintDescription": "must be a valid EC2 instance type."
+    }
+  },
+  "Mappings" : {
+    "AWSAmazonLinuxAMI": {
+      "us-east-1":      { "name":"Virginia",   "201303": "ami-3275ee5b", "201309": "ami-35792c5c" },
+      "us-west-2":      { "name":"Oregon",     "201303": "ami-ecbe2adc", "201309": "ami-d03ea1e0" },
+      "us-west-1":      { "name":"California", "201303": "ami-66d1fc23", "201309": "ami-687b4f2d" },
+      "eu-west-1":      { "name":"Ireland",    "201303": "ami-44939930", "201309": "ami-149f7863" },
+      "ap-southeast-1": { "name":"Singapole",  "201303": "ami-aa9ed2f8", "201309": "ami-14f2b946" },
+      "ap-southeast-2": { "name":"Sydney",     "201303": "ami-363eaf0c", "201309": "ami-a148d59b" },
+      "ap-northeast-1": { "name":"Tokyo",      "201303": "ami-173fbf16", "201309": "ami-3561fe34" },
+      "sa-east-1":      { "name":"SaoPaulo",   "201303": "ami-dd6bb0c0", "201309": "ami-9f6ec982" }
+    }
+  },
+  "Resources" : {
+    "PostfixRole" : {
+      "Type" : "AWS::IAM::Role",
+      "Properties" : {
+        "AssumeRolePolicyDocument" : {
+          "Statement": [ {
+            "Effect": "Allow",
+              "Principal": {
+                "Service": [ "ec2.amazonaws.com" ]
+              },
+              "Action": [ "sts:AssumeRole" ]
+          } ]
+        },
+        "Path" : "/",
+        "Policies" :[ {
+          "PolicyName" : "PowerUserPolicy",
+          "PolicyDocument" : {
+            "Statement": [ {
+              "Sid": "PowerUserStmt",
+              "Effect": "Allow",
+              "NotAction": "iam:*",
+              "Resource": "*"
+            } ]
+          }
+        }]
+      }
+    },
+    "PostfixProfile" : {
+      "Type" : "AWS::IAM::InstanceProfile",
+      "Properties" : {
+        "Roles" : [ { "Ref" : "PostfixRole" } ]
+      }
+    },
+
+    "PostfixSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "VpcId" : {"Ref" : "VpcId"},
+        "GroupDescription" : "Enable HTTP/HTTPS access via port 80/443",
+        "SecurityGroupIngress" : [
+          { "IpProtocol" : "tcp", "FromPort" : "22",  "ToPort" : "22",  "CidrIp" : "0.0.0.0/0" },
+          { "IpProtocol" : "tcp", "FromPort" : "25",  "ToPort" : "25",  "CidrIp" : "0.0.0.0/0" }
+        ]
+      }
+    },
+
+    "PrimaryPostfixInstanceEIP": {
+      "Type": "AWS::EC2::EIP",
+      "Properties": {
+        "Domain": "vpc",
+        "InstanceId": { "Ref": "PrimaryPostfixInstance" }
+      }
+    },
+    "PrimaryPostfixInstance" : {
+      "Type" : "AWS::EC2::Instance",
+      "Properties" : {
+        "InstanceType" : { "Ref" : "InstanceType" },
+        "ImageId" : { "Fn::FindInMap" : [ "AWSAmazonLinuxAMI", { "Ref" : "AWS::Region" }, "201309" ]},
+        "KeyName" : { "Ref" : "KeyName" },
+        "IamInstanceProfile": { "Ref" : "PostfixProfile" },
+        "SubnetId" : { "Ref" : "PrimarySubnetId" },
+        "SecurityGroupIds" : [
+          { "Ref" : "PostfixSecurityGroup" }
+        ],
+        "Tags" : [
+          { "Key" : "Name", "Value" : "Postfix-P" },
+          { "Key" : "Network", "Value" : "Public" }
+        ],
+        "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#! /bin/bash -v\n",
+          "yum update -y aws-cfn-bootstrap aws-cli\n",
+
+          "# Helper function\n",
+          "function error_exit\n",
+          "{\n",
+          "  /opt/aws/bin/cfn-signal -e 1 -r \"$1\" '", { "Ref" : "PrimaryPostfixInstanceWaitHandle" }, "'\n",
+          "  exit 1\n",
+          "}\n",
+
+          "# Install packages\n",
+          "/opt/aws/bin/cfn-init -c default -s ", { "Ref" : "AWS::StackId" }, " -r PrimaryPostfixInstance ",
+          "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
+
+          "# All is well so signal success\n",
+          "/opt/aws/bin/cfn-signal -e $? -r \"PrimaryPostfixInstance setup complete\" '", { "Ref" : "PrimaryPostfixInstanceWaitHandle" }, "'\n"
+        ]]}}
+      },
+      "Metadata" : {
+        "AWS::CloudFormation::Init" : {
+          "configSets" : {
+            "default" : [ "1" , "2" ]
+          },
+          "1" : {
+            "packages" : {
+              "yum" : {
+                "postfix" : []
+              }
+            },
+            "services" : {
+              "sysvinit" : {
+                "sendmail" : { "enabled" : "false", "ensureRunning" : "false" }
+              }
+            }
+          },
+          "2" : {
+            "files" : {
+              "/etc/postfix/main.cf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "queue_directory = /var/spool/postfix\n",
+                  "command_directory = /usr/sbin\n",
+                  "daemon_directory = /usr/libexec/postfix\n",
+                  "data_directory = /var/lib/postfix\n",
+                  "mail_owner = postfix\n",
+                  "myhostname = mail.", {"Ref" : "DomainName"}, "\n",
+                  "mydomain = ", {"Ref" : "DomainName"}, "\n",
+                  "myorigin = $mydomain\n",
+                  "inet_interfaces = all\n",
+                  "inet_protocols = all\n",
+                  "mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain\n",
+                  "unknown_local_recipient_reject_code = 550\n",
+                  "mynetworks = ", {"Ref" : "VpcCidrBlock"}, "\n",
+                  "alias_maps = hash:/etc/aliases\n",
+                  "alias_database = hash:/etc/aliases\n",
+                  "home_mailbox = Maildir/\n",
+                  "smtpd_banner = $myhostname ESMTP unknown\n",
+                  "debug_peer_level = 2\n",
+                  "debugger_command =\n",
+                  "\t PATH=/bin:/usr/bin:/usr/local/bin:/usr/X11R6/bin\n",
+                  "\t ddd $daemon_directory/$process_name $process_id & sleep 5\n",
+                  "sendmail_path = /usr/sbin/sendmail.postfix\n",
+                  "newaliases_path = /usr/bin/newaliases.postfix\n",
+                  "mailq_path = /usr/bin/mailq.postfix\n",
+                  "setgid_group = postdrop\n",
+                  "html_directory = no\n",
+                  "manpage_directory = /usr/share/man\n",
+                  "sample_directory = /usr/share/doc/postfix-2.6.6/samples\n",
+                  "readme_directory = /usr/share/doc/postfix-2.6.6/README_FILES\n"
+                ]]},
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root"
+              }
+            },
+            "services" : {
+              "sysvinit" : {
+                "postfix"  : { "enabled" : "true", "ensureRunning" : "true" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "PrimaryPostfixInstanceWaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+    },
+    "PrimaryPostfixInstanceWaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : "PrimaryPostfixInstance",
+      "Properties" : {
+        "Handle" : {"Ref" : "PrimaryPostfixInstanceWaitHandle"},
+        "Timeout" : "900"
+      }
+    },
+    "PrimaryPostfixDNSRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "Properties" : {
+        "HostedZoneName" : { "Fn::Join" : [ "", [{"Ref" : "HostedZone"}, "." ]]},
+        "Comment" : "A record for the primary Postfix instance.",
+        "Name" : { "Fn::Join" : [ "", ["mail.", {"Ref" : "DomainName"}, "." ]]},
+        "Type" : "A",
+        "TTL" : "300",
+        "ResourceRecords" : [
+          {"Ref" :"PrimaryPostfixInstanceEIP"}
+        ]
+      }
+    },
+    
+    "SecondaryPostfixInstanceEIP": {
+      "Type": "AWS::EC2::EIP",
+      "Properties": {
+        "Domain": "vpc",
+        "InstanceId": { "Ref": "SecondaryPostfixInstance" }
+      }
+    },
+    "SecondaryPostfixInstance" : {
+      "Type" : "AWS::EC2::Instance",
+      "Properties" : {
+        "InstanceType" : { "Ref" : "InstanceType" },
+        "ImageId" : { "Fn::FindInMap" : [ "AWSAmazonLinuxAMI", { "Ref" : "AWS::Region" }, "201309" ]},
+        "KeyName" : { "Ref" : "KeyName" },
+        "IamInstanceProfile": { "Ref" : "PostfixProfile" },
+        "SubnetId" : { "Ref" : "SecondarySubnetId" },
+        "SecurityGroupIds" : [
+          { "Ref" : "PostfixSecurityGroup" }
+        ],
+        "Tags" : [
+          { "Key" : "Name", "Value" : "Postfix-S" },
+          { "Key" : "Network", "Value" : "Public" }
+        ],
+        "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#! /bin/bash -v\n",
+          "yum update -y aws-cfn-bootstrap aws-cli\n",
+
+          "# Helper function\n",
+          "function error_exit\n",
+          "{\n",
+          "  /opt/aws/bin/cfn-signal -e 1 -r \"$1\" '", { "Ref" : "SecondaryPostfixInstanceWaitHandle" }, "'\n",
+          "  exit 1\n",
+          "}\n",
+
+          "# Install packages\n",
+          "/opt/aws/bin/cfn-init -c default -s ", { "Ref" : "AWS::StackId" }, " -r SecondaryPostfixInstance ",
+          "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
+
+          "# All is well so signal success\n",
+          "/opt/aws/bin/cfn-signal -e $? -r \"SecondaryPostfixInstance setup complete\" '", { "Ref" : "SecondaryPostfixInstanceWaitHandle" }, "'\n"
+        ]]}}
+      },
+      "Metadata" : {
+        "AWS::CloudFormation::Init" : {
+          "configSets" : {
+            "default" : [ "1" , "2" ]
+          },
+          "1" : {
+            "packages" : {
+              "yum" : {
+                "postfix" : []
+              }
+            },
+            "services" : {
+              "sysvinit" : {
+                "sendmail" : { "enabled" : "false", "ensureRunning" : "false" }
+              }
+            }
+          },
+          "2" : {
+            "files" : {
+              "/etc/postfix/main.cf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "queue_directory = /var/spool/postfix\n",
+                  "command_directory = /usr/sbin\n",
+                  "daemon_directory = /usr/libexec/postfix\n",
+                  "data_directory = /var/lib/postfix\n",
+                  "mail_owner = postfix\n",
+                  "myhostname = mail2.", {"Ref" : "DomainName"}, "\n",
+                  "mydomain = ", {"Ref" : "DomainName"}, "\n",
+                  "myorigin = $mydomain\n",
+                  "inet_interfaces = all\n",
+                  "inet_protocols = all\n",
+                  "mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain\n",
+                  "unknown_local_recipient_reject_code = 550\n",
+                  "mynetworks = ", {"Ref" : "VpcCidrBlock"}, "\n",
+                  "relay_domains = $mydestination\n",
+                  "alias_maps = hash:/etc/aliases\n",
+                  "alias_database = hash:/etc/aliases\n",
+                  "smtpd_banner = $myhostname ESMTP unknown\n",
+                  "debug_peer_level = 2\n",
+                  "debugger_command =\n",
+                  "\t PATH=/bin:/usr/bin:/usr/local/bin:/usr/X11R6/bin\n",
+                  "\t ddd $daemon_directory/$process_name $process_id & sleep 5\n",
+                  "sendmail_path = /usr/sbin/sendmail.postfix\n",
+                  "newaliases_path = /usr/bin/newaliases.postfix\n",
+                  "mailq_path = /usr/bin/mailq.postfix\n",
+                  "setgid_group = postdrop\n",
+                  "html_directory = no\n",
+                  "manpage_directory = /usr/share/man\n",
+                  "sample_directory = /usr/share/doc/postfix-2.6.6/samples\n",
+                  "readme_directory = /usr/share/doc/postfix-2.6.6/README_FILES\n",
+                  "transport_maps = hash:/etc/postfix/transport\n"
+                ]]},
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root"
+              },
+              "/etc/postfix/transport" : {
+                "content" : { "Fn::Join" : ["", [
+                  {"Ref" : "DomainName"}, "\tsmtp:[", {"Ref" : "PrimaryPostfixDNSRecord"}, "]\n"
+                ]]},
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root"
+              }
+            },
+            "commands" : {
+              "postmap" : {
+                "command" : "/usr/sbin/postmap /etc/postfix/transport"
+              }
+            },
+            "services" : {
+              "sysvinit" : {
+                "postfix"  : { "enabled" : "true", "ensureRunning" : "true" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "SecondaryPostfixInstanceWaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+    },
+    "SecondaryPostfixInstanceWaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : "SecondaryPostfixInstance",
+      "Properties" : {
+        "Handle" : {"Ref" : "SecondaryPostfixInstanceWaitHandle"},
+        "Timeout" : "900"
+      }
+    },
+    "SecondaryPostfixDNSRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "Properties" : {
+        "HostedZoneName" : { "Fn::Join" : [ "", [{"Ref" : "HostedZone"}, "." ]]},
+        "Comment" : "A record for the secondary Postfix instance.",
+        "Name" : { "Fn::Join" : [ "", ["mail2.", {"Ref" : "DomainName"}, "." ]]},
+        "Type" : "A",
+        "TTL" : "300",
+        "ResourceRecords" : [
+          {"Ref" :"SecondaryPostfixInstanceEIP"}
+        ]
+      }
+    },
+    
+    "MXDNSRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "Properties" : {
+        "HostedZoneName" : { "Fn::Join" : [ "", [{"Ref" : "HostedZone"}, "." ]]},
+        "Comment" : "MX record for the Postfix instance.",
+        "Name" : { "Fn::Join" : [ "", [{"Ref" : "DomainName"}, "." ]]},
+        "Type" : "MX",
+        "TTL" : "300",
+        "ResourceRecords" : [
+          { "Fn::Join" : [ "", ["10 ", {"Ref" : "PrimaryPostfixDNSRecord"}, "." ]]},
+          { "Fn::Join" : [ "", ["20 ", {"Ref" : "SecondaryPostfixDNSRecord"}, "." ]]}
+        ]
+      }
+    }
+  }
+}

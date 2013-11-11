@@ -4,12 +4,12 @@ buildscript {
 		maven { url 'http://public-maven.classmethod.info/release' }
 	}
 	dependencies {
-		classpath 'jp.classmethod.aws:gradle-aws-plugin:0.1'
+		classpath 'jp.classmethod.aws:gradle-aws-plugin:0.2'
 	}
 }
 
 ext {
-	artifactId = 'cfnbase'
+	artifactId = 'postfix'
 	templateBucket = 'cm-public-cfn-templates'
 }
 
