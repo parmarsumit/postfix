@@ -4,32 +4,26 @@
   "Parameters" : {
     "HostedZone" : {
       "Description" : "The DNS name of an existing Amazon Route 53 hosted zone",
-      "Default" : "miyamoto.classmethod.info",
       "Type" : "String"
     },
     "DomainName" : {
       "Description" : "The domain name of mail addresses",
-      "Default" : "miyamoto.classmethod.info",
       "Type" : "String"
     },
     "VpcId" : {
       "Type" : "String",
-      "Default" : "vpc-5524fd3d",
       "Description" : "VpcId of your existing Virtual Private Cloud (VPC)"
     },
     "VpcCidrBlock" : {
       "Type" : "String",
-      "Default" : "10.0.0.0/16",
       "Description" : "CIDR block of your Virtual Private Cloud (VPC)"
     },
     "PrimarySubnetId" : {
       "Type" : "String",
-      "Default" : "subnet-5724fd3f",
       "Description" : "SubnetId in your Virtual Private Cloud (VPC)"
     },
     "SecondarySubnetId" : {
       "Type" : "String",
-      "Default" : "subnet-5624fd3e",
       "Description" : "SubnetId in your Virtual Private Cloud (VPC)"
     },
     "KeyName" : {
@@ -38,7 +32,6 @@
       "MinLength" : "1",
       "MaxLength" : "64",
       "AllowedPattern" : "[-_ a-zA-Z0-9]*",
-      "Default" : "miyamoto-kp1",
       "ConstraintDescription" : "can contain only alphanumeric characters, spaces, dashes and underscores."
     },
     "InstanceType": {
@@ -50,6 +43,19 @@
         "m2.4xlarge", "c1.medium", "c1.xlarge", "cc1.4xlarge", "cc2.8xlarge", "cg1.4xlarge"
       ],
       "ConstraintDescription": "must be a valid EC2 instance type."
+    },
+    "PostfixAdminSetupPass" : {
+      "Type" : "String",
+      "Description" : "-"
+    },
+    "MaintenanceFrom": {
+      "Description": "Lockdown SSH access to the bastion host (default can be accessed from anywhere)",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid CIDR range of the form x.x.x.x/x."
     }
   },
   "Mappings" : {
@@ -62,6 +68,10 @@
       "ap-southeast-2": { "name":"Sydney",     "201303": "ami-363eaf0c", "201309": "ami-a148d59b" },
       "ap-northeast-1": { "name":"Tokyo",      "201303": "ami-173fbf16", "201309": "ami-3561fe34" },
       "sa-east-1":      { "name":"SaoPaulo",   "201303": "ami-dd6bb0c0", "201309": "ami-9f6ec982" }
+    },
+    "StackConfig" : {
+      "Postfix"               : { "Version" : "2.6.6" },
+      "PostfixAdmin"          : { "Version" : "2.3.6" }
     }
   },
   "Resources" : {
@@ -102,10 +112,11 @@
       "Type" : "AWS::EC2::SecurityGroup",
       "Properties" : {
         "VpcId" : {"Ref" : "VpcId"},
-        "GroupDescription" : "Enable HTTP/HTTPS access via port 80/443",
+        "GroupDescription" : "Enable SMTP access from the Internet and SSH/HTTP access from maintenance CIDR.",
         "SecurityGroupIngress" : [
-          { "IpProtocol" : "tcp", "FromPort" : "22",  "ToPort" : "22",  "CidrIp" : "0.0.0.0/0" },
-          { "IpProtocol" : "tcp", "FromPort" : "25",  "ToPort" : "25",  "CidrIp" : "0.0.0.0/0" }
+          { "IpProtocol" : "tcp", "FromPort" : "25",  "ToPort" : "25",  "CidrIp" : "0.0.0.0/0" },
+          { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "MaintenanceFrom" } },
+          { "IpProtocol" : "tcp", "FromPort" : "80", "ToPort" : "80", "CidrIp" : { "Ref" : "MaintenanceFrom" } }
         ]
       }
     },
@@ -129,7 +140,7 @@
           { "Ref" : "PostfixSecurityGroup" }
         ],
         "Tags" : [
-          { "Key" : "Name", "Value" : "Postfix-P" },
+          { "Key" : "Name", "Value" : "Postfix1" },
           { "Key" : "Network", "Value" : "Public" }
         ],
         "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
@@ -159,17 +170,93 @@
           "1" : {
             "packages" : {
               "yum" : {
-                "postfix" : []
+                "postfix" : [ { "Fn::FindInMap" : [ "StackConfig", "Postfix", "Version" ]} ],
+                "mysql-server" : [],
+                "httpd" : [],
+                "php" : [],
+                "php-mysql" : [],
+                "php-mbstring" : []
+              }
+            },
+            "sources" : {
+              "/var/www/html" : { "Fn::Join" : ["", [
+                "http://sourceforge.net/projects/postfixadmin/files/postfixadmin",
+                "/postfixadmin-", { "Fn::FindInMap" : [ "StackConfig", "PostfixAdmin", "Version" ]},
+                "/postfixadmin-", { "Fn::FindInMap" : [ "StackConfig", "PostfixAdmin", "Version" ]}, ".tar.gz/download"
+              ]]}
+            },
+            "groups" : {
+              "vusers" : { "gid" : "10000" }
+            },
+            "commands" : {
+              "01-rename" : {
+                "command" : { "Fn::Join" : ["", [
+                  "mv /var/www/html/postfixadmin-", { "Fn::FindInMap" : [ "StackConfig", "PostfixAdmin", "Version" ]}, " /var/www/html/postfixadmin"
+                ]]}
+              },
+              "02-users" : {
+                "command" : { "Fn::Join" : ["", [
+                  "/usr/sbin/useradd -r --shell /sbin/nologin -u 10000 -g 10000 vusers"
+                ]]}
               }
             },
             "services" : {
               "sysvinit" : {
-                "sendmail" : { "enabled" : "false", "ensureRunning" : "false" }
+                "sendmail" : { "enabled" : "false", "ensureRunning" : "false" },
+                "mysqld"  : { "enabled" : "true", "ensureRunning" : "true" }
               }
             }
           },
           "2" : {
             "files" : {
+              "/var/www/html/postfixadmin/config.local.php" : {
+                "content" : { "Fn::Join" : ["", [
+                  "<?php\n",
+                  "$CONF['configured'] = true;\n",
+                  "$CONF['setup_password'] = '__SETUP_PASSWORD__';\n",
+                  
+                  "$CONF['admin_email'] = 'postmaster@", {"Ref" : "DomainName"}, "';\n",
+                  "$CONF['show_password'] = 'NO';\n",
+                  "$CONF['dovecotpw'] = \"/usr/bin/doveadm pw\";\n",
+                  "$CONF['default_aliases'] = array (\n",
+                  "    'abuse' => 'root@", {"Ref" : "DomainName"}, "',\n",
+                  "    'hostmaster' => 'root@", {"Ref" : "DomainName"}, "',\n",
+                  "    'postmaster' => 'root@", {"Ref" : "DomainName"}, "',\n",
+                  "    'webmaster' => 'root@", {"Ref" : "DomainName"}, "'\n",
+                  ");\n",
+                  
+                  "$CONF['aliases'] = '0';\n",
+                  "$CONF['mailboxes'] = '0';\n",
+                  "$CONF['maxquota'] = '0';\n",
+                  
+                  "$CONF['domain_path'] = 'YES';\n",
+                  "$CONF['domain_in_mailbox'] = 'NO';\n",
+                  
+                  "$CONF['vacation_domain'] = 'autoreply.", {"Ref" : "DomainName"}, "';\n",
+                  
+                  "$CONF['alias_domain'] = 'NO';\n",
+                  "$CONF['sendmail'] = 'NO';\n",
+                  "$CONF['fetchmail'] = 'NO';\n",
+                  
+                  "$CONF['user_footer_link'] = \"http://", {"Ref" : "DomainName"}, "/main\";\n",
+                  
+                  "$CONF['show_footer_text'] = 'NO';\n",
+                  "$CONF['footer_text'] = 'Return to ", {"Ref" : "DomainName"}, "';\n",
+                  "$CONF['footer_link'] = 'http://mail.", {"Ref" : "DomainName"}, "/postfixadmin/users/main.php';\n",
+                  
+                  "$CONF['emailcheck_resolve_domain']='NO';\n",
+                  
+                  "$CONF['mailbox_postdeletion_script'] = 'sudo -u vusers /home/vusers/bin/postfixadmin-mailbox-postdeletion.sh';\n",
+                  "$CONF['domain_postdeletion_script'] = 'sudo -u vusers /home/vusers/bin/postfixadmin-domain-postdeletion.sh';\n",
+                  
+                  "$CONF['create_mailbox_subdirs_prefix']='';\n",
+                  "$CONF['new_quota_table'] = 'YES';\n",
+                  "$CONF['quota'] = 'YES';\n"
+                ]]},
+                "mode"    : "000640",
+                "owner"   : "apache",
+                "group"   : "apache"
+              },
               "/etc/postfix/main.cf" : {
                 "content" : { "Fn::Join" : ["", [
                   "queue_directory = /var/spool/postfix\n",
@@ -182,7 +269,7 @@
                   "myorigin = $mydomain\n",
                   "inet_interfaces = all\n",
                   "inet_protocols = all\n",
-                  "mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain\n",
+                  "mydestination =\n",
                   "unknown_local_recipient_reject_code = 550\n",
                   "mynetworks = ", {"Ref" : "VpcCidrBlock"}, "\n",
                   "alias_maps = hash:/etc/aliases\n",
@@ -199,17 +286,107 @@
                   "setgid_group = postdrop\n",
                   "html_directory = no\n",
                   "manpage_directory = /usr/share/man\n",
-                  "sample_directory = /usr/share/doc/postfix-2.6.6/samples\n",
-                  "readme_directory = /usr/share/doc/postfix-2.6.6/README_FILES\n"
+                  "sample_directory = /usr/share/doc/postfix-", { "Fn::FindInMap" : [ "StackConfig", "Postfix", "Version" ]}, "/samples\n",
+                  "readme_directory = /usr/share/doc/postfix-", { "Fn::FindInMap" : [ "StackConfig", "Postfix", "Version" ]}, "/README_FILES\n",
+                  
+                  "local_transport = local\n",
+                  "virtual_transport = virtual\n",
+                  "virtual_mailbox_base = /home/vusers\n",
+                  "virtual_alias_maps = mysql:/etc/postfix/mysql_virtual_alias_maps.cf\n",
+                  "virtual_alias_domains = $virtual_alias_maps\n",
+                  "virtual_mailbox_domains = mysql:/etc/postfix/mysql_virtual_domains_maps.cf\n",
+                  "virtual_mailbox_maps = mysql:/etc/postfix/mysql_virtual_mailbox_maps.cf\n",
+                  "virtual_uid_maps = static:10000\n",
+                  "virtual_gid_maps = static:10000\n",
+                  "virtual_minimum_uid = 10000\n",
+                  
+                  "virtual_create_maildirsize = yes\n",
+                  "virtual_maildir_extended = yes\n",
+                  "virtual_mailbox_limit_maps = mysql:/etc/postfix/mysql_virtual_mailbox_limit_maps.cf\n",
+                  "virtual_mailbox_limit_override = yes\n",
+                  "virtual_overquota_bounce = no\n",
+                  "virtual_trash_count = no\n"
+                ]]},
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root"
+              },
+              "/etc/postfix/mysql_virtual_alias_maps.cf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "user = postfix\n",
+                  "password = postfixadmin\n",
+                  "hosts = localhost\n",
+                  "dbname = postfix\n",
+                  "query = SELECT goto FROM alias WHERE address='%s'\n"
+                ]]},
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root"
+              },
+              "/etc/postfix/mysql_virtual_domains_maps.cf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "user = postfix\n",
+                  "password = postfixadmin\n",
+                  "hosts = localhost\n",
+                  "dbname = postfix\n",
+                  "query = SELECT domain FROM domain WHERE domain='%s' AND active='1'\n"
+                ]]},
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root"
+              },
+              "/etc/postfix/mysql_virtual_mailbox_maps.cf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "user = postfix\n",
+                  "password = postfixadmin\n",
+                  "hosts = localhost\n",
+                  "dbname = postfix\n",
+                  "query = SELECT maildir FROM mailbox WHERE username='%s'\n"
+                ]]},
+                "mode"    : "000644",
+                "owner"   : "root",
+                "group"   : "root"
+              },
+              "/etc/postfix/mysql_virtual_mailbox_limit_maps.cf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "user = postfix\n",
+                  "password = postfixadmin\n",
+                  "hosts = localhost\n",
+                  "dbname = postfix\n",
+                  "query = SELECT quota FROM mailbox WHERE username='%s' AND active = '1'\n"
                 ]]},
                 "mode"    : "000644",
                 "owner"   : "root",
                 "group"   : "root"
               }
             },
+            "commands" : {
+              "setup_password" : {
+                "command" : { "Fn::Join" : ["", [
+                  "SALT=`echo -n $(date '+%s')*$RANDOM | md5sum | cut -c-32`",
+                  "  && ENCODED=$SALT:$(echo -n $SALT:", { "Ref" : "PostfixAdminSetupPass" },  " | sha1sum | cut -c-40)",
+                  "  && sed -i -e \"s/__SETUP_PASSWORD__/$ENCODED/\" /var/www/html/postfixadmin/config.local.php"
+                ]]}
+              },
+              "mysql_create" : {
+                "command" : { "Fn::Join" : ["", [
+                  "mysql -e \"",
+                  "CREATE DATABASE postfix;",
+                  "grant all privileges on postfix.* to postfix@localhost identified by 'postfixadmin';",
+                  "\""
+                ]]}
+              },
+              "chown" : {
+                "command" : "chown -R apache:apache /var/www/html/postfixadmin/"
+              },
+              "chmod" : {
+                "command" : "find /var/www/html/postfixadmin/ -name \"*.php\" -exec chmod 640 \\{\\} \\;"
+              }
+            },
             "services" : {
               "sysvinit" : {
-                "postfix"  : { "enabled" : "true", "ensureRunning" : "true" }
+                "postfix" : { "enabled" : "true", "ensureRunning" : "true" },
+                "httpd"   : { "enabled" : "true", "ensureRunning" : "true" }
               }
             }
           }
@@ -260,7 +437,7 @@
           { "Ref" : "PostfixSecurityGroup" }
         ],
         "Tags" : [
-          { "Key" : "Name", "Value" : "Postfix-S" },
+          { "Key" : "Name", "Value" : "Postfix2" },
           { "Key" : "Network", "Value" : "Public" }
         ],
         "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
@@ -290,7 +467,7 @@
           "1" : {
             "packages" : {
               "yum" : {
-                "postfix" : []
+                "postfix" : [ { "Fn::FindInMap" : [ "StackConfig", "Postfix", "Version" ]} ]
               }
             },
             "services" : {
@@ -330,8 +507,8 @@
                   "setgid_group = postdrop\n",
                   "html_directory = no\n",
                   "manpage_directory = /usr/share/man\n",
-                  "sample_directory = /usr/share/doc/postfix-2.6.6/samples\n",
-                  "readme_directory = /usr/share/doc/postfix-2.6.6/README_FILES\n",
+                  "sample_directory = /usr/share/doc/postfix-", { "Fn::FindInMap" : [ "StackConfig", "Postfix", "Version" ]}, "/samples\n",
+                  "readme_directory = /usr/share/doc/postfix-", { "Fn::FindInMap" : [ "StackConfig", "Postfix", "Version" ]}, "/README_FILES\n",
                   "transport_maps = hash:/etc/postfix/transport\n"
                 ]]},
                 "mode"    : "000644",
@@ -399,6 +576,14 @@
           { "Fn::Join" : [ "", ["20 ", {"Ref" : "SecondaryPostfixDNSRecord"}, "." ]]}
         ]
       }
+    }
+  },
+  "Outputs" : {
+    "PostfixadminURL" : {
+      "Description" : "URL to connect Postfixadmin",
+      "Value" : { "Fn::Join" :["", [
+        "http://mail.", {"Ref" : "DomainName"}, "/postfixadmin/setup.php"
+      ]] }
     }
   }
 }
