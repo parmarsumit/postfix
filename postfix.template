@@ -165,98 +165,63 @@
       "Metadata" : {
         "AWS::CloudFormation::Init" : {
           "configSets" : {
-            "default" : [ "1" , "2" ]
+            "default" : [
+              "install_and_run_mysql",
+              "setup_mysql",
+              "install_postfix",
+              "setup_and_run_postfix",
+              "install_postfixadmin",
+              "setup_and_run_postfixadmin"
+            ]
           },
-          "1" : {
+          "install_and_run_mysql" : {
             "packages" : {
               "yum" : {
-                "postfix" : [ { "Fn::FindInMap" : [ "StackConfig", "Postfix", "Version" ]} ],
-                "mysql-server" : [],
-                "httpd" : [],
-                "php" : [],
-                "php-mysql" : [],
-                "php-mbstring" : []
+                "mysql-server" : []
               }
             },
-            "sources" : {
-              "/var/www/html" : { "Fn::Join" : ["", [
-                "http://sourceforge.net/projects/postfixadmin/files/postfixadmin",
-                "/postfixadmin-", { "Fn::FindInMap" : [ "StackConfig", "PostfixAdmin", "Version" ]},
-                "/postfixadmin-", { "Fn::FindInMap" : [ "StackConfig", "PostfixAdmin", "Version" ]}, ".tar.gz/download"
-              ]]}
+            "services" : {
+              "sysvinit" : {
+                "mysqld"  : { "enabled" : "true", "ensureRunning" : "true" }
+              }
+            }
+          },
+          "setup_mysql" : {
+            "commands" : {
+              "mysql_create" : {
+                "command" : { "Fn::Join" : ["", [
+                  "mysql -e \"",
+                  "CREATE DATABASE postfix;",
+                  "grant all privileges on postfix.* to postfix@localhost identified by 'postfixadmin';",
+                  "\""
+                ]]}
+              }
+            }
+          },
+          "install_postfix" : {
+            "packages" : {
+              "yum" : {
+                "postfix" : [ { "Fn::FindInMap" : [ "StackConfig", "Postfix", "Version" ]} ]
+              }
             },
             "groups" : {
               "vusers" : { "gid" : "10000" }
             },
             "commands" : {
-              "01-rename" : {
+              "01-users" : {
                 "command" : { "Fn::Join" : ["", [
-                  "mv /var/www/html/postfixadmin-", { "Fn::FindInMap" : [ "StackConfig", "PostfixAdmin", "Version" ]}, " /var/www/html/postfixadmin"
-                ]]}
-              },
-              "02-users" : {
-                "command" : { "Fn::Join" : ["", [
-                  "/usr/sbin/useradd -r --shell /sbin/nologin -u 10000 -g 10000 vusers"
+                  "/usr/sbin/useradd -r -m --shell /sbin/nologin -u 10000 -g 10000 vusers"
                 ]]}
               }
             },
             "services" : {
               "sysvinit" : {
-                "sendmail" : { "enabled" : "false", "ensureRunning" : "false" },
-                "mysqld"  : { "enabled" : "true", "ensureRunning" : "true" }
+                "sendmail" : { "enabled" : "false", "ensureRunning" : "false" }
               }
             }
           },
-          "2" : {
+          "setup_and_run_postfix" : {
             "files" : {
-              "/var/www/html/postfixadmin/config.local.php" : {
-                "content" : { "Fn::Join" : ["", [
-                  "<?php\n",
-                  "$CONF['configured'] = true;\n",
-                  "$CONF['setup_password'] = '__SETUP_PASSWORD__';\n",
-                  
-                  "$CONF['admin_email'] = 'postmaster@", {"Ref" : "DomainName"}, "';\n",
-                  "$CONF['show_password'] = 'NO';\n",
-                  "$CONF['dovecotpw'] = \"/usr/bin/doveadm pw\";\n",
-                  "$CONF['default_aliases'] = array (\n",
-                  "    'abuse' => 'root@", {"Ref" : "DomainName"}, "',\n",
-                  "    'hostmaster' => 'root@", {"Ref" : "DomainName"}, "',\n",
-                  "    'postmaster' => 'root@", {"Ref" : "DomainName"}, "',\n",
-                  "    'webmaster' => 'root@", {"Ref" : "DomainName"}, "'\n",
-                  ");\n",
-                  
-                  "$CONF['aliases'] = '0';\n",
-                  "$CONF['mailboxes'] = '0';\n",
-                  "$CONF['maxquota'] = '0';\n",
-                  
-                  "$CONF['domain_path'] = 'YES';\n",
-                  "$CONF['domain_in_mailbox'] = 'NO';\n",
-                  
-                  "$CONF['vacation_domain'] = 'autoreply.", {"Ref" : "DomainName"}, "';\n",
-                  
-                  "$CONF['alias_domain'] = 'NO';\n",
-                  "$CONF['sendmail'] = 'NO';\n",
-                  "$CONF['fetchmail'] = 'NO';\n",
-                  
-                  "$CONF['user_footer_link'] = \"http://", {"Ref" : "DomainName"}, "/main\";\n",
-                  
-                  "$CONF['show_footer_text'] = 'NO';\n",
-                  "$CONF['footer_text'] = 'Return to ", {"Ref" : "DomainName"}, "';\n",
-                  "$CONF['footer_link'] = 'http://mail.", {"Ref" : "DomainName"}, "/postfixadmin/users/main.php';\n",
-                  
-                  "$CONF['emailcheck_resolve_domain']='NO';\n",
-                  
-                  "$CONF['mailbox_postdeletion_script'] = 'sudo -u vusers /home/vusers/bin/postfixadmin-mailbox-postdeletion.sh';\n",
-                  "$CONF['domain_postdeletion_script'] = 'sudo -u vusers /home/vusers/bin/postfixadmin-domain-postdeletion.sh';\n",
-                  
-                  "$CONF['create_mailbox_subdirs_prefix']='';\n",
-                  "$CONF['new_quota_table'] = 'YES';\n",
-                  "$CONF['quota'] = 'YES';\n"
-                ]]},
-                "mode"    : "000640",
-                "owner"   : "apache",
-                "group"   : "apache"
-              },
               "/etc/postfix/main.cf" : {
                 "content" : { "Fn::Join" : ["", [
                   "queue_directory = /var/spool/postfix\n",
@@ -360,20 +325,93 @@
                 "group"   : "root"
               }
             },
+            "services" : {
+              "sysvinit" : {
+                "postfix" : { "enabled" : "true", "ensureRunning" : "true" }
+              }
+            }
+          },
+          "install_postfixadmin" : {
+            "packages" : {
+              "yum" : {
+                "httpd" : [],
+                "php" : [],
+                "php-mysql" : [],
+                "php-mbstring" : []
+              }
+            },
+            "sources" : {
+              "/var/www/html" : { "Fn::Join" : ["", [
+                "http://sourceforge.net/projects/postfixadmin/files/postfixadmin",
+                "/postfixadmin-", { "Fn::FindInMap" : [ "StackConfig", "PostfixAdmin", "Version" ]},
+                "/postfixadmin-", { "Fn::FindInMap" : [ "StackConfig", "PostfixAdmin", "Version" ]}, ".tar.gz/download"
+              ]]}
+            },
+            "commands" : {
+              "01-rename" : {
+                "command" : { "Fn::Join" : ["", [
+                  "mv /var/www/html/postfixadmin-", { "Fn::FindInMap" : [ "StackConfig", "PostfixAdmin", "Version" ]}, " /var/www/html/postfixadmin"
+                ]]}
+              }
+            }
+          },
+          "setup_and_run_postfixadmin" : {
+            "files" : {
+              "/var/www/html/postfixadmin/config.local.php" : {
+                "content" : { "Fn::Join" : ["", [
+                  "<?php\n",
+                  "$CONF['configured'] = true;\n",
+                  "$CONF['setup_password'] = 'changeme';\n",
+                  
+                  "$CONF['admin_email'] = 'postmaster@", {"Ref" : "DomainName"}, "';\n",
+                  "$CONF['show_password'] = 'NO';\n",
+                  "$CONF['dovecotpw'] = \"/usr/bin/doveadm pw\";\n",
+                  "$CONF['default_aliases'] = array (\n",
+                  "    'abuse' => 'root@", {"Ref" : "DomainName"}, "',\n",
+                  "    'hostmaster' => 'root@", {"Ref" : "DomainName"}, "',\n",
+                  "    'postmaster' => 'root@", {"Ref" : "DomainName"}, "',\n",
+                  "    'webmaster' => 'root@", {"Ref" : "DomainName"}, "'\n",
+                  ");\n",
+                  
+                  "$CONF['aliases'] = '0';\n",
+                  "$CONF['mailboxes'] = '0';\n",
+                  "$CONF['maxquota'] = '0';\n",
+                  
+                  "$CONF['domain_path'] = 'YES';\n",
+                  "$CONF['domain_in_mailbox'] = 'NO';\n",
+                  
+                  "$CONF['vacation_domain'] = 'autoreply.", {"Ref" : "DomainName"}, "';\n",
+                  
+                  "$CONF['alias_domain'] = 'NO';\n",
+                  "$CONF['sendmail'] = 'NO';\n",
+                  "$CONF['fetchmail'] = 'NO';\n",
+                  
+                  "$CONF['user_footer_link'] = \"http://", {"Ref" : "DomainName"}, "/main\";\n",
+                  
+                  "$CONF['show_footer_text'] = 'NO';\n",
+                  "$CONF['footer_text'] = 'Return to ", {"Ref" : "DomainName"}, "';\n",
+                  "$CONF['footer_link'] = 'http://mail.", {"Ref" : "DomainName"}, "/postfixadmin/users/main.php';\n",
+                  
+                  "$CONF['emailcheck_resolve_domain']='NO';\n",
+                  
+                  "$CONF['mailbox_postdeletion_script'] = 'sudo -u vusers /home/vusers/bin/postfixadmin-mailbox-postdeletion.sh';\n",
+                  "$CONF['domain_postdeletion_script'] = 'sudo -u vusers /home/vusers/bin/postfixadmin-domain-postdeletion.sh';\n",
+                  
+                  "$CONF['create_mailbox_subdirs_prefix']='';\n",
+                  "$CONF['new_quota_table'] = 'YES';\n",
+                  "$CONF['quota'] = 'YES';\n"
+                ]]},
+                "mode"    : "000640",
+                "owner"   : "apache",
+                "group"   : "apache"
+              }
+            },
             "commands" : {
               "setup_password" : {
                 "command" : { "Fn::Join" : ["", [
                   "SALT=`echo -n $(date '+%s')*$RANDOM | md5sum | cut -c-32`",
                   "  && ENCODED=$SALT:$(echo -n $SALT:", { "Ref" : "PostfixAdminSetupPass" },  " | sha1sum | cut -c-40)",
-                  "  && sed -i -e \"s/__SETUP_PASSWORD__/$ENCODED/\" /var/www/html/postfixadmin/config.local.php"
-                ]]}
-              },
-              "mysql_create" : {
-                "command" : { "Fn::Join" : ["", [
-                  "mysql -e \"",
-                  "CREATE DATABASE postfix;",
-                  "grant all privileges on postfix.* to postfix@localhost identified by 'postfixadmin';",
-                  "\""
+                  "  && sed -i -e \"s/changeme/$ENCODED/\" /var/www/html/postfixadmin/config.local.php"
                 ]]}
               },
               "chown" : {
@@ -385,7 +423,6 @@
             },
             "services" : {
               "sysvinit" : {
-                "postfix" : { "enabled" : "true", "ensureRunning" : "true" },
                 "httpd"   : { "enabled" : "true", "ensureRunning" : "true" }
               }
             }
@@ -462,9 +499,12 @@
       "Metadata" : {
         "AWS::CloudFormation::Init" : {
           "configSets" : {
-            "default" : [ "1" , "2" ]
+            "default" : [
+              "replace_sendmail_with_postfix",
+              "setup_and_run_postfix"
+            ]
           },
-          "1" : {
+          "replace_sendmail_with_postfix" : {
             "packages" : {
               "yum" : {
                 "postfix" : [ { "Fn::FindInMap" : [ "StackConfig", "Postfix", "Version" ]} ]
@@ -476,7 +516,7 @@
               }
             }
           },
-          "2" : {
+          "setup_and_run_postfix" : {
             "files" : {
               "/etc/postfix/main.cf" : {
                 "content" : { "Fn::Join" : ["", [
