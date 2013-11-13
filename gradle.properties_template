@@ -1,3 +1,6 @@
 awsAccessKey=<for demo or deploy>
 awsSecretKey=<for demo or deploy>
 keyName=<for demo>
+hostedZone=<hosted zone name>
+domainName=<mail domain name>
+postfixAdminSetupPass=<setup password for postfixadmin>
