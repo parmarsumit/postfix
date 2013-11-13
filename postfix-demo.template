@@ -1,6 +1,150 @@
 {
   "AWSTemplateFormatVersion" : "2010-09-09",
   "Description" : "CloudFormation template file.",
+  "Parameters" : {
+    "HostedZone" : {
+      "Description" : "The DNS name of an existing Amazon Route 53 hosted zone",
+      "Type" : "String"
+    },
+    "DomainName" : {
+      "Description" : "The domain name of mail addresses",
+      "Type" : "String"
+    },
+    "KeyName" : {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instances",
+      "Type" : "String",
+      "MinLength" : "1",
+      "MaxLength" : "64",
+      "AllowedPattern" : "[-_ a-zA-Z0-9]*",
+      "ConstraintDescription" : "can contain only alphanumeric characters, spaces, dashes and underscores."
+    },
+    "PostfixAdminSetupPass" : {
+      "Type" : "String",
+      "Description" : "-"
+    }
+  },
+  "Mappings" : {
+    "AZ" : {
+      "us-east-1" :      { "primary" : "us-east-1d",      "secondary" : "us-east-1a" },
+      "us-west-2" :      { "primary" : "us-west-2a",      "secondary" : "us-west-2b" },
+      "us-west-1" :      { "primary" : "us-west-1a",      "secondary" : "us-west-1b" },
+      "eu-west-1" :      { "primary" : "eu-west-1a",      "secondary" : "eu-west-1b" },
+      "ap-southeast-1" : { "primary" : "ap-southeast-1a", "secondary" : "ap-southeast-1b" },
+      "ap-southeast-2" : { "primary" : "ap-southeast-2a", "secondary" : "ap-southeast-2b" },
+      "ap-northeast-1" : { "primary" : "ap-northeast-1a", "secondary" : "ap-northeast-1c" },
+      "sa-east-1" :      { "primary" : "sa-east-1a",      "secondary" : "sa-east-1b" }
+    },
+    "StackConfig" : {
+      "VPC"           : { "CIDR" : "10.0.0.0/16" },
+      "PublicSubnet1" : { "CIDR" : "10.0.0.0/24" },
+      "PublicSubnet2" : { "CIDR" : "10.0.1.0/24" }
+    }
+  },
   "Resources" : {
+    "VPC" : {
+      "Type" : "AWS::EC2::VPC",
+      "Properties" : {
+        "CidrBlock" : { "Fn::FindInMap" : [ "StackConfig", "VPC", "CIDR" ]},
+        "InstanceTenancy" : "default",
+        "Tags" : [
+          {"Key" : "Application", "Value" : {"Ref" : "AWS::StackId"} },
+          {"Key" : "Network", "Value" : "Public" }
+        ]
+      }
+    },
+    "InternetGateway" : {
+      "Type" : "AWS::EC2::InternetGateway",
+      "Properties" : {
+        "Tags" : [
+          {"Key" : "Application", "Value" : { "Ref" : "AWS::StackId"} },
+          {"Key" : "Network", "Value" : "Public" }
+        ]
+      }
+    },
+    "AttachGateway" : {
+      "Type" : "AWS::EC2::VPCGatewayAttachment",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VPC" },
+        "InternetGatewayId" : { "Ref" : "InternetGateway" }
+      }
+    },
+    "PublicRouteTable" : {
+      "Type" : "AWS::EC2::RouteTable",
+      "DependsOn" : "AttachGateway",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VPC" },
+        "Tags" : [
+          {"Key" : "Application", "Value" : { "Ref" : "AWS::StackId"} },
+          {"Key" : "Network", "Value" : "Public" }
+        ]
+      }
+    },
+    "PublicRoute" : {
+      "Type" : "AWS::EC2::Route",
+      "DependsOn" : "AttachGateway",
+      "Properties" : {
+        "RouteTableId" : { "Ref" : "PublicRouteTable" },
+        "DestinationCidrBlock" : "0.0.0.0/0",
+        "GatewayId" : { "Ref" : "InternetGateway" }
+      }
+    },
+    "PublicSubnet1": {
+      "Type": "AWS::EC2::Subnet",
+      "DependsOn" : "AttachGateway",
+      "Properties": {
+        "VpcId": { "Ref": "VPC" },
+        "AvailabilityZone": { "Fn::FindInMap": [ "AZ", { "Ref": "AWS::Region" }, "primary" ]},
+        "CidrBlock": { "Fn::FindInMap" : [ "StackConfig", "PublicSubnet1", "CIDR" ]}
+      }
+    },
+    "PublicSubnet1RouteTableAssociation" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "PublicSubnet1" },
+        "RouteTableId" : { "Ref" : "PublicRouteTable" }
+      }
+    },
+    "PublicSubnet2": {
+      "Type": "AWS::EC2::Subnet",
+      "DependsOn" : "AttachGateway",
+      "Properties": {
+        "VpcId": { "Ref": "VPC" },
+        "AvailabilityZone": { "Fn::FindInMap": [ "AZ", { "Ref": "AWS::Region" }, "secondary" ]},
+        "CidrBlock": { "Fn::FindInMap" : [ "StackConfig", "PublicSubnet2", "CIDR" ]}
+      }
+    },
+    "PublicSubnet2RouteTableAssociation" : {
+      "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties" : {
+        "SubnetId" : { "Ref" : "PublicSubnet2" },
+        "RouteTableId" : { "Ref" : "PublicRouteTable" }
+      }
+    },
+
+    "Postfix": {
+      "Type" : "AWS::CloudFormation::Stack",
+      "DependsOn" : "AttachGateway",
+      "Properties" : {
+        "TemplateURL" : "https://cm-public-cfn-templates.s3.amazonaws.com/postfix/postfix-1.0-SNAPSHOT.template",
+         "Parameters" : {
+           "HostedZone": { "Ref": "HostedZone" },
+           "DomainName": { "Ref": "DomainName" },
+           "VpcId": { "Ref": "VPC" },
+           "VpcCidrBlock": { "Fn::FindInMap" : [ "StackConfig", "VPC", "CIDR" ]},
+           "PrimarySubnetId": { "Ref": "PublicSubnet1" },
+           "SecondarySubnetId": { "Ref": "PublicSubnet2" },
+           "PostfixAdminSetupPass": { "Ref": "PostfixAdminSetupPass" },
+           "MaintenanceFrom" : "0.0.0.0/0",
+           "InstanceType": "t1.micro",
+           "KeyName": { "Ref": "KeyName" }
+         }
+      }
+    }
+  },
+  "Outputs" : {
+    "PostfixadminURL" : {
+      "Description" : "URL to connect Postfixadmin",
+      "Value" : { "Fn::GetAtt" : [ "Postfix", "Outputs.PostfixadminURL" ]}
+    }
   }
 }
