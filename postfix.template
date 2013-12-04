@@ -39,21 +39,31 @@
       "Description": "EC2 instance type",
       "Type": "String",
       "AllowedValues": [
-        "t1.micro", "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge",
-        "m2.4xlarge", "c1.medium", "c1.xlarge", "cc1.4xlarge", "cc2.8xlarge", "cg1.4xlarge"
+        "m3.xlarge", "m3.2xlarge",
+        "m1.small", "m1.medium", "m1.large", "m1.xlarge",
+        "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge",
+        "c1.xlarge",
+        "cc2.8xlarge",
+        "m2.xlarge", "m2.2xlarge", "m2.4xlarge",
+        "cr1.8xlarge",
+        "hi1.4xlarge",
+        "hs1.8xlarge",
+        "t1.micro",
+        "g2.2xlarge",
+        "cg1.4xlarge"
       ],
       "ConstraintDescription": "must be a valid EC2 instance type."
     },
     "PostfixAdminSetupPass" : {
       "Type" : "String",
-      "Description" : "-"
+      "Description" : "Setup password for postfixadmin."
     },
     "MaintenanceFrom": {
+      "Default": "0.0.0.0/0",
       "Description": "Lockdown SSH access to the bastion host (default can be accessed from anywhere)",
       "Type": "String",
       "MinLength": "9",
       "MaxLength": "18",
-      "Default": "0.0.0.0/0",
       "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
       "ConstraintDescription": "must be a valid CIDR range of the form x.x.x.x/x."
     }
@@ -530,10 +540,10 @@
                   "myorigin = $mydomain\n",
                   "inet_interfaces = all\n",
                   "inet_protocols = all\n",
-                  "mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain\n",
+                  "mydestination = $myhostname, localhost.$mydomain, localhost\n",
                   "unknown_local_recipient_reject_code = 550\n",
                   "mynetworks = ", {"Ref" : "VpcCidrBlock"}, "\n",
-                  "relay_domains = $mydestination\n",
+                  "relay_domains = $mydestination, $mydomain\n",
                   "alias_maps = hash:/etc/aliases\n",
                   "alias_database = hash:/etc/aliases\n",
                   "smtpd_banner = $myhostname ESMTP unknown\n",
