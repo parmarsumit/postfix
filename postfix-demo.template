@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion" : "2010-09-09",
-  "Description" : "CloudFormation template file.",
+  "Description" : "Postfix DEMO CloudFormation template file.",
   "Parameters" : {
     "HostedZone" : {
       "Description" : "The DNS name of an existing Amazon Route 53 hosted zone",
