@@ -125,7 +125,7 @@
       "Type" : "AWS::CloudFormation::Stack",
       "DependsOn" : "AttachGateway",
       "Properties" : {
-        "TemplateURL" : "https://cm-public-cfn-templates.s3.amazonaws.com/postfix/postfix-1.0-SNAPSHOT.template",
+        "TemplateURL" : "https://cm-public-cfn-templates.s3.amazonaws.com/postfix/postfix-1.0.template",
          "Parameters" : {
            "HostedZone": { "Ref": "HostedZone" },
            "DomainName": { "Ref": "DomainName" },
